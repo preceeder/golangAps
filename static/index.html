@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Store List</title>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    h1 { font-size: 24px; }
+    ul { list-style: none; padding: 0; }
+    li { padding: 10px; border-bottom: 1px solid #ccc; cursor: pointer; }
+    li:hover { background-color: #f0f0f0; }
+  </style>
+</head>
+<body>
+  <h1>Available Stores</h1>
+  <ul id="storeList"></ul>
+
+  <script>
+    async function loadStores() {
+      const res = await fetch("/stores");
+      const stores = await res.json();
+
+      const ul = document.getElementById("storeList");
+      stores.forEach(store => {
+        const li = document.createElement("li");
+        li.textContent = store;
+        li.onclick = () => {
+          window.location.href = `/web/job.html?store=${encodeURIComponent(store)}`;
+        };
+        ul.appendChild(li);
+      });
+    }
+
+    loadStores();
+  </script>
+</body>
+</html>

@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Job Scheduler</title>
+  <link href="https://cdn.jsdelivr.net/npm/jsoneditor@9.10.0/dist/jsoneditor.min.css" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/jsoneditor@9.10.0/dist/jsoneditor.min.js"></script>
+  <style>
+    body { font-family: sans-serif; margin: 20px; }
+    h1 { font-size: 24px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+    th, td { border: 1px solid #ccc; padding: 10px; text-align: left; }
+    th { background-color: #f0f0f0; }
+    input, select, button, textarea { margin: 5px; padding: 5px; }
+    .actions button { margin-right: 5px; }
+    .pagination { text-align: center; margin-top: 20px; }
+    .pagination button { padding: 5px 10px; }
+    .header-container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+    }
+
+    .header_button {
+      padding: 6px 12px;
+      font-size: 14px;
+    }
+
+    /* 弹窗背景遮罩 */
+    .modal-overlay {
+      display: none; /* 默认隐藏 */
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background-color: rgba(0,0,0,0.5);
+      z-index: 999;
+    }
+
+    /* 弹窗内容框 */
+    .modal {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: white;
+      width: 500px;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 0 10px #333;
+      z-index: 1000;
+    }
+
+    /* 显示弹窗 */
+    .modal-overlay.show {
+      display: block;
+    }
+
+    /* 关闭按钮样式 */
+    .close-btn {
+      float: right;
+      cursor: pointer;
+      font-weight: bold;
+      font-size: 18px;
+    }
+
+  </style>
+</head>
+<body>
+<!-- 弹窗结构 -->
+<div class="modal-overlay" id="modalOverlay">
+  <div class="modal">
+    <span class="close-btn" id="closeBtn">&times;</span>
+    <h2 id="modalTitle">添加任务</h2>
+    <div id="form">
+      <div id="addJob_jsonDisplay" style="width: 100%; height: 400px;"></div>
+      <button onclick="addJob()" id="modalActionBtn">Add</button>
+    </div>
+  </div>
+</div>
+<div class="header-container">
+  <h1><a href="index.html" style="text-decoration: none; color: inherit;">Job Scheduler</a></h1>
+  <button onclick="addjobBt()">添加任务</button>
+</div>
+<div style="margin-bottom: 10px;">
+  <label>搜索前缀：</label>
+  <input type="text" id="searchPrefix" placeholder="输入任务 ID 前缀">
+  <button onclick="searchJobs()">搜索</button>
+</div>
+  <table id="jobTable">
+    <thead>
+      <tr>
+        <th>ID</th>
+        <th>Name</th>
+        <th>Status</th>
+        <th>Store</th>
+        <th>Func</th>
+        <th>Args</th>
+        <th>Next Run</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div class="pagination">
+    <button onclick="prevPage()">&lt;</button>
+    <span id="page">1</span>
+    <button onclick="nextPage()">&gt;</button>
+  </div>
+
+  <script>
+    let currentPage = 1;
+    const pageSize = 10;
+    const modalOverlay = document.getElementById('modalOverlay');
+    const closeBtn = document.getElementById('closeBtn');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalActionBtn = document.getElementById('modalActionBtn');
+    var searchLastJobId = ""
+    const jobCache = {};
+
+
+    // 关闭弹窗
+    closeBtn.addEventListener('click', () => {
+      modalOverlay.classList.remove('show');
+    });
+    // 点击遮罩关闭弹窗
+    modalOverlay.addEventListener('click', (e) => {
+      if (e.target === modalOverlay) {
+        modalOverlay.classList.remove('show');
+      }
+    });
+
+    const container = document.getElementById("addJob_jsonDisplay")
+    const editor = new JSONEditor(container, {
+      mode: 'code', // 或 'tree', 'view'
+    });
+
+    function getStoreName() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("store") || "default";
+    }
+
+    // 这个是加载全部任务， 一般都不使用
+    async function loadJobs() {
+      const store = getStoreName();
+      const tbody = document.querySelector("#jobTable tbody");
+      tbody.innerHTML = "";
+
+      const res = await fetch(`/jobs/all/${store}?offset=${(currentPage - 1) * pageSize}&limit=${pageSize}`);
+      const jobs = await res.json();
+
+      jobs.forEach(job => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${job.id}</td>
+          <td>${job.name}</td>
+          <td>${job.status}</td>
+          <td>${job.store_name}</td>
+          <td>${job.func_name}</td>
+          <td>${JSON.stringify(job.args)}</td>
+          <td>${formatDate(new Date(job.next_run_time * 1000))}</td>
+         <td class="actions">
+            ${job.status === 'running' ? `<button onclick="pauseJob('${job.store_name}', '${job.id}')">Pause</button>`
+                : `<button onclick="resumeJob('${job.store_name}', '${job.id}')">Resume</button>`}
+            <button onclick="editJob('${job.store_name}', '${job.id}')">Edit</button>
+            <button onclick="runJob('${job.store_name}', '${job.id}')">执行任务</button>
+            <button onclick="deleteJob('${job.store_name}', '${job.id}')">Delete</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    async function searchJobs() {
+      const store = getStoreName();
+
+      const prefix = document.getElementById("searchPrefix").value.trim();
+      const tbody = document.querySelector("#jobTable tbody");
+      tbody.innerHTML = "";
+      const cacheKey = `${store}:${prefix}`;
+      if (!jobCache[cacheKey]) {
+        jobCache[cacheKey] = { pages: {}, totalCount: 0 };
+      }
+      const cache = jobCache[cacheKey];
+      let jobs = [];
+      if (cache.pages[currentPage]) {
+        jobs = cache.pages[currentPage];
+        if (jobs.length > 0){
+          searchLastJobId = jobs[jobs.length-1].id
+        }
+      }else{
+        if (currentPage === 1){
+          searchLastJobId = ""
+        }
+        const res = await fetch(`/jobs/search/${store}?prefix=${prefix}&last_id=${searchLastJobId}&limit=${pageSize}`);
+        const jobData = await res.json();
+        if (jobData["last_id"] !== ""){
+          searchLastJobId = jobData["last_id"]
+        }
+        if (jobData["jobs"].length === 0){
+          alert("没有更多数据了")
+        }
+        jobs = jobData["jobs"]
+        cache.pages[currentPage] = jobs;
+      }
+
+
+      jobs.forEach(job => {
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${job.id}</td>
+          <td>${job.name}</td>
+          <td>${job.status}</td>
+          <td>${job.store_name}</td>
+          <td>${job.func_name}</td>
+          <td>${JSON.stringify(job.args)}</td>
+          <td>${formatDate(new Date(job.next_run_time * 1000))}</td>
+         <td class="actions">
+            ${job.status === 'running' ? `<button onclick="pauseJob('${job.store_name}', '${job.id}')">Pause</button>`
+                : `<button onclick="resumeJob('${job.store_name}', '${job.id}')">Resume</button>`}
+            <button onclick="editJob('${job.store_name}', '${job.id}')">Edit</button>
+            <button onclick="runJob('${job.store_name}', '${job.id}')">执行任务</button>
+            <button onclick="deleteJob('${job.store_name}', '${job.id}')">Delete</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+
+
+
+    function formatDate(date) {
+      const pad = (n) => n.toString().padStart(2, '0');
+
+      const year = date.getFullYear();
+      const month = pad(date.getMonth() + 1); // 月份从0开始
+      const day = pad(date.getDate());
+      const hours = pad(date.getHours());
+      const minutes = pad(date.getMinutes());
+      const seconds = pad(date.getSeconds());
+
+      return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+    }
+
+    async function addJobGetData(){
+      const job = {
+        id: "",
+        name: "",
+        store_name: "",
+        func_name: "",
+        timeout: 20,
+        max_instance: 1,
+        replace: true,
+        trigger: {
+          cron_expr:"",  // cron 触发器特有的
+          start_time: "",  // 通用
+          end_time:"",     // cron 和interval 触发器有用
+          interval: 0,     // interval触发器特有
+          utc_time_zone: "UTC+8",  // 通用
+          Jitter: 0   // 通用
+        },
+        args: {}
+      };
+
+      try {
+        const errors = editor.validate();
+        if (errors.length > 0) {
+          alert("json 格式错误")
+        }
+        job_data = editor.get();
+        // cron_expr      cron 触发器特有的
+        // utc_time_zone   默认就是UTC, 中国使用 UTC+8
+        // start_time    2024-02-02 23:12:00
+        // end_time      2024-02-03 23:12:00
+        // Jitter       超过这个误差时间就忽略本次执行
+        // interval    int 秒，
+        job.id = job_data.id
+        job.name = job_data.name
+        job.store_name = job_data.store_name
+        job.func_name = job_data.func_name
+        job.timeout = job_data.timeout
+        job.max_instance = job_data.max_instance
+        job.replace = job_data.replace
+        job.trigger = job_data.trigger
+        job.args = job_data.args
+      } catch (e) {
+        alert("Args 必须是合法 JSON");
+        return;
+      }
+      return job
+    }
+
+    async function addJob() {
+      let job = await addJobGetData()
+      await fetch("/job", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(job),
+      });
+
+      searchJobs();
+      modalOverlay.classList.remove('show');
+    }
+
+    async function deleteJob(store, id) {
+      await fetch(`/job/${store}/${id}`, {method: "DELETE"});
+      loadJobs();
+    }
+
+
+    async function pauseJob(store, id) {
+      await fetch(`/job/pause/${store}/${id}`, { method: "PUT" });
+      searchJobs();
+    }
+
+    async function resumeJob(store, id) {
+    await fetch(`/job/resume/${store}/${id}`, { method: "PUT" });
+    searchJobs();
+  }
+
+    function prevPage() {
+      if (currentPage > 1) {
+        currentPage--;
+        document.getElementById("page").textContent = currentPage;
+
+        searchJobs();
+      }
+    }
+
+    function nextPage() {
+      currentPage++;
+      document.getElementById("page").textContent = currentPage;
+      searchJobs();
+    }
+
+    function addjobBt(){
+      const job = {
+        id: "任务id",
+        name: "任务名",
+        store_name: "存储器名， 默认就是 default",
+        func_name: "执行任务的函数名",
+        timeout: 20,
+        max_instance: 1,
+        replace: true,
+        trigger: {
+          cron_expr:"cron 触发器特有的",  // cron 触发器特有的
+          start_time: "任务的开始执行时间",  // 通用
+          end_time:"任务的结束执行时间，cron 和interval 触发器有用",     // cron 和interval 触发器有用
+          interval: 0,     // interval触发器特有
+          utc_time_zone: "UTC+8",  // 通用
+          Jitter: 0   // 通用
+        },
+        args: {
+          "参数":"哈哈，我是参数",
+        }
+      };
+
+      // 显示到页面上
+      editor.set(job)
+      modalTitle.textContent = "添加任务"
+      modalActionBtn.textContent = '确定';
+      modalActionBtn.onclick = function () {
+        addJob(); // 动态绑定 editJob
+      };
+      modalOverlay.classList.add('show');
+    }
+
+    
+    async function editJob(store, id) {
+      const res = await fetch(`/job/${store}/${id}`);
+      const job = await res.json();
+      editor.set(job)
+      modalTitle.textContent = "修改任务"
+      modalActionBtn.textContent = '确定';
+      modalActionBtn.onclick = function () {
+        addJob(); // 动态绑定 editJob
+      };
+      modalOverlay.classList.add('show');
+    }
+
+    async function runJob(store, id) {
+      const res = await fetch(`/job/${store}/${id}`);
+      const job = await res.json();
+      editor.set(job)
+      modalTitle.textContent = "执行任务"
+      modalActionBtn.textContent = '执行';
+      modalActionBtn.onclick = function () {
+        RunJob(); // 动态绑定 editJob
+      };
+      modalOverlay.classList.add('show');
+    }
+
+    async function RunJob(){
+      let job = await addJobGetData()
+      await fetch("/job/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(job),
+      });
+      searchJobs();
+      modalOverlay.classList.remove('show');
+    }
+
+    searchJobs();
+  </script>
+</body>
+</html>
