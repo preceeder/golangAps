@@ -113,15 +113,21 @@
   </div>
 
   <script>
-    let currentPage = 1;
+    var currentPage = 1;
     const pageSize = 10;
+    var jobCache = {};
     const modalOverlay = document.getElementById('modalOverlay');
     const closeBtn = document.getElementById('closeBtn');
     const modalTitle = document.getElementById('modalTitle');
     const modalActionBtn = document.getElementById('modalActionBtn');
     var searchLastJobId = ""
-    const jobCache = {};
 
+    // 操作后处理一下这个， 重新加载任务
+    function initPage(){
+      currentPage = 1;
+      document.getElementById("page").textContent = currentPage
+      jobCache = {};
+    }
 
     // 关闭弹窗
     closeBtn.addEventListener('click', () => {
@@ -231,9 +237,6 @@
       });
     }
 
-
-
-
     function formatDate(date) {
       const pad = (n) => n.toString().padStart(2, '0');
 
@@ -303,24 +306,35 @@
         body: JSON.stringify(job),
       });
 
+      initPage();
       searchJobs();
       modalOverlay.classList.remove('show');
     }
 
     async function deleteJob(store, id) {
-      await fetch(`/job/${store}/${id}`, {method: "DELETE"});
+      const res = await fetch(`/job/${store}/${id}`, {method: "DELETE"});
+      let result = res.json()
+      console.log(result)
+      initPage();
       loadJobs();
     }
 
 
     async function pauseJob(store, id) {
-      await fetch(`/job/pause/${store}/${id}`, { method: "PUT" });
+      const res = await fetch(`/job/pause/${store}/${id}`, { method: "PUT" });
+      let result = res.json()
+      console.log(result)
+
+      initPage();
       searchJobs();
     }
 
     async function resumeJob(store, id) {
-    await fetch(`/job/resume/${store}/${id}`, { method: "PUT" });
-    searchJobs();
+      const res =await fetch(`/job/resume/${store}/${id}`, { method: "PUT" });
+      let result = res.json()
+      console.log(result)
+      initPage();
+      searchJobs();
   }
 
     function prevPage() {

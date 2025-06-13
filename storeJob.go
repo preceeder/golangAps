@@ -48,7 +48,7 @@ func (b *StoreJob) Start() {
 	b.mutexS.Lock()
 	b.mutexS.Unlock()
 	b.isRunning = true
-	b.timer = time.NewTimer(0)
+	b.timer = time.NewTimer(time.Second * 1)
 	b.jobChangeChan = make(chan int, 1)
 	b.immediatelyRunJob = make(chan Job, 1)
 	pool, err := ants.NewPool(1000, ants.WithNonblocking(true))
@@ -238,6 +238,7 @@ func (b *StoreJob) run() func() {
 	for {
 		select {
 		case <-b.timer.C:
+			DefaultLog.Info(context.Background(), "执行任务了")
 			now := time.Now().UTC()
 			nowi := now.Unix()
 			jobIds, locks := b.store.AtomicListAndLock(b.storeName, nowi)
