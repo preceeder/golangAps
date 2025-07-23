@@ -319,7 +319,6 @@
       loadJobs();
     }
 
-
     async function pauseJob(store, id) {
       const res = await fetch(`/job/pause/${store}/${id}`, { method: "PUT" });
       let result = res.json()
