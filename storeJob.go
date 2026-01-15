@@ -53,7 +53,7 @@ func (b *StoreJob) Start() error {
 	b.isRunning = true
 	b.timer = time.NewTimer(time.Second * 1)
 	b.jobChangeChan = make(chan int, 1)
-	b.immediatelyRunJob = make(chan Job, 1)
+	b.immediatelyRunJob = make(chan Job, 100) // 增加容量以支持高并发立即执行
 	pool, err := ants.NewPool(100, ants.WithNonblocking(true))
 	if err != nil {
 		b.isRunning = false

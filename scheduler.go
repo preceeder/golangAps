@@ -399,14 +399,31 @@ func (s *Scheduler) ResumeJob(storeName, id string) (Job, error) {
 
 // 立即执行任务
 func (s *Scheduler) ImmediatelyRunJob(job Job) error {
+	// 1. 检查 store 是否存在
 	sj, ok := s.storeJobs.Load(job.StoreName)
 	if !ok {
 		return fmt.Errorf("store not found: %s", job.StoreName)
 	}
+	storeJob := sj.(*StoreJob)
+	
+	// 2. 检查 StoreJob 是否正在运行
+	if !storeJob.IsRunning() {
+		return fmt.Errorf("store is not running: %s", job.StoreName)
+	}
+	
+	// 3. 尝试发送到 channel（非阻塞）
+	// 注意：如果 channel 已关闭，向已关闭的 channel 发送会 panic
+	// 但使用 select 时，如果 channel 已关闭，case 分支会立即返回 false，不会 panic
 	select {
-	case sj.(*StoreJob).immediatelyRunJob <- job:
+	case storeJob.immediatelyRunJob <- job:
+		// 发送成功
 		return nil
 	default:
-		return fmt.Errorf("immediately run job channel is full or closed for store: %s", job.StoreName)
+		// 4. 如果失败，再次检查运行状态（可能在这期间被关闭了）
+		if !storeJob.IsRunning() {
+			return fmt.Errorf("store is not running: %s", job.StoreName)
+		}
+		// Channel 已满
+		return fmt.Errorf("immediately run job channel is full for store: %s", job.StoreName)
 	}
 }
