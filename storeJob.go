@@ -326,21 +326,23 @@ func (b *StoreJob) run() {
 		case job, ok := <-b.immediatelyRunJob:
 			if !ok {
 				// channel 已关闭
-				return
+				continue
 			}
 			// 立即执行任务（确保 lockManager 存在）
 			lockManager := b.store.ensureLockManager(job.StoreName)
 			jobLock := lockManager.GetLock(job.Id)
 			jobLock.Lock()
+
 			ctx := NewContext()
-			err := b.pool.Submit(func() { 
-				defer jobLock.Unlock()
-				b.runJob(ctx, &job) 
+			err := b.pool.Submit(func() {
+				b.runJob(ctx, &job)
 			})
 			if err != nil {
 				jobLock.Unlock()
 				DefaultLog.Error(ctx, "pool submit _scheduleJob", "store", b.storeName, "error", err.Error(), "job", job)
+				continue
 			}
+			jobLock.Unlock()
 
 		case <-b.ctx.Done():
 			DefaultLog.Info(context.Background(), "StoreJob run quit.", "store", b.storeName)
