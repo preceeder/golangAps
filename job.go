@@ -82,7 +82,7 @@ func (j *Job) Init() error {
 		return errors.New("endTime can't lt startTime")
 	}
 
-	if j.MaxInstance == 0 {
+	if j.MaxInstance <= 0 {
 		j.MaxInstance = 1
 	}
 
@@ -204,8 +204,15 @@ func ExecuteHttpJob(job Job) any {
 	}
 	defer resp.Body.Close()
 
-	_, err = io.ReadAll(resp.Body)
-	return err
+	bodyBytes, err = io.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+	// 检查 HTTP 状态码
+	if resp.StatusCode >= 400 {
+		return fmt.Errorf("HTTP request failed with status %d: %s", resp.StatusCode, string(bodyBytes))
+	}
+	return nil
 }
 
 // 通用的执行脚本的任务方法
@@ -231,7 +238,11 @@ func ExecuteScriptJob(job Job) any {
 	err := json.Unmarshal(marshal, &jobArgs)
 	if err != nil {
 		DefaultLog.Error(context.Background(), "ExecuteScriptJob", "unmarshal job args", err.Error())
-		return nil
+		return err
+	}
+	// 如果 timeout 为 0 或未设置，使用默认超时时间（5分钟）
+	if jobArgs.Timeout <= 0 {
+		jobArgs.Timeout = 300 // 默认 5 分钟
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(jobArgs.Timeout)*time.Second)
 	defer cancel()

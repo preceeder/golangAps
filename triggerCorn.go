@@ -72,8 +72,8 @@ func (ct *CronTrigger) ToMap() map[string]any {
 	return map[string]any{
 		"cron_expr":     ct.CronExpr,
 		"utc_time_zone": ct.TimeZoneName,
-		"start_time":    ct.startTime,
-		"end_time":      ct.endTime,
+		"start_time":    ct.StartTime,
+		"end_time":      ct.EndTime,
 		"Jitter":        ct.Jitter,
 	}
 }
@@ -117,6 +117,7 @@ func (ct *CronTrigger) Init() error {
 		}
 		ct.endTime = eTime.UTC().Unix()
 	}
+	ct.isInit = true
 
 	return nil
 }
@@ -128,7 +129,7 @@ func (ct *CronTrigger) GetJitterTime() int64 {
 // GetNextRunTime
 // previousFireTime   s
 // now   s
-func (ct CronTrigger) GetNextRunTime(previousFireTime, now int64) (int64, error) {
+func (ct *CronTrigger) GetNextRunTime(previousFireTime, now int64) (int64, error) {
 	expr, err := cronexpr.Parse(ct.CronExpr)
 	if err != nil {
 		return 0, fmt.Errorf(" CronExpr `%s` error: %s", ct.CronExpr, err)

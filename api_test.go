@@ -1,7 +1,6 @@
 package golangAps
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -20,7 +19,7 @@ func TestRunAdmin(t *testing.T) {
 		Description: "初次测试",
 	})
 	RegisterJobsFunc(FuncInfo{
-		Func:        R02Test,
+		Func:        R03Test,
 		Name:        "test",
 		Description: "初次测试",
 	})
@@ -33,12 +32,12 @@ func TestRunAdmin(t *testing.T) {
 	//	return
 	//}
 	sp.Start()
-	ec := RunAdmin(sp, ":8080")
-	signalLister(func() {
-		err := ec.Shutdown(context.Background())
-		if err != nil {
-			fmt.Println("关闭echo 异常", err.Error())
-		}
-		sp.Stop()
-	})
+	//ec := RunAdmin(sp, ":8080")
+	//signalLister(func() {
+	//	err := ec.Shutdown(context.Background())
+	//	if err != nil {
+	//		fmt.Println("关闭echo 异常", err.Error())
+	//	}
+	//	sp.Stop()
+	//})
 }

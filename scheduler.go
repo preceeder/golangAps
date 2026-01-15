@@ -35,9 +35,8 @@ func NewScheduler(path string) *Scheduler {
 }
 
 func (s *Scheduler) IsRunning() bool {
-	//s.mutexS.RLock()
-	//defer s.mutexS.RUnlock()
-
+	s.mutexS.RLock()
+	defer s.mutexS.RUnlock()
 	return s.isRunning
 }
 
@@ -49,6 +48,11 @@ func (s *Scheduler) SetStore(storeName string) (err error) {
 	if _, ok := s.storeJobs.Load(storeName); ok {
 		return nil
 	}
+	// 确保 SQLite 表已创建
+	err = s.store.EnsureTable(storeName)
+	if err != nil {
+		return err
+	}
 	// 不存在就创建， 存在就不管了
 	storeJobs := NewStoreJob(s.store, storeName)
 	defer func() {
@@ -58,7 +62,10 @@ func (s *Scheduler) SetStore(storeName string) (err error) {
 			Msg:       strings.Join([]string{"store name: ", storeName}, ""),
 		}
 	}()
-	storeJobs.Start()
+	err = storeJobs.Start()
+	if err != nil {
+		return err
+	}
 	s.storeJobs.Store(storeName, storeJobs)
 
 	return
@@ -89,6 +96,8 @@ func (s *Scheduler) GetAllStoreName() []string {
 
 // Start scheduler 开启运行
 func (s *Scheduler) Start() {
+	s.mutexS.Lock()
+	defer s.mutexS.Unlock()
 	if s.isRunning {
 		DefaultLog.Info(context.Background(), "Scheduler is running.")
 		return
@@ -106,7 +115,11 @@ func (s *Scheduler) Start() {
 			continue
 		}
 		sj := NewStoreJob(s.store, storeName)
-		sj.Start()
+		if err := sj.Start(); err != nil {
+			DefaultLog.Error(context.Background(), "Failed to start StoreJob", "store", storeName, "error", err)
+			// 继续处理其他 store，不中断整个启动过程
+			continue
+		}
 		s.storeJobs.Store(storeName, sj)
 	}
 
@@ -115,24 +128,24 @@ func (s *Scheduler) Start() {
 
 // Stop 停止scheduler
 func (s *Scheduler) Stop() {
+	s.mutexS.Lock()
 	if !s.isRunning {
+		s.mutexS.Unlock()
 		DefaultLog.Info(context.Background(), "Scheduler has stopped.")
 		return
 	}
+	s.isRunning = false
+	s.mutexS.Unlock()
+
 	s.storeJobs.Range(func(k, v interface{}) bool {
 		v.(*StoreJob).Stop()
 		return true
 	})
-	err := s.store.db.Close()
-	if err != nil {
-		DefaultLog.Error(context.Background(), "Scheduler merge failed", "error", err.Error())
-	}
-	err = s.store.Close()
+	err := s.store.Close()
 	if err != nil {
 		DefaultLog.Error(context.Background(), "Close store failed", "error", err.Error())
 	}
 	s.cancel()
-	s.isRunning = false
 	DefaultLog.Info(context.Background(), "Scheduler stop.")
 }
 
@@ -163,13 +176,11 @@ func (s *Scheduler) AddJob(j Job) (Job, error) {
 		DefaultLog.Info(ctx, "Scheduler add store err:", err)
 		return Job{}, err
 	}
-	// 加锁
-	locks, ok := s.store.locks[j.StoreName]
-	if ok {
-		lock := locks.GetLock(j.Id)
-		lock.Lock()
-		defer lock.Unlock()
-	}
+	// 加锁（确保 lockManager 存在）
+	lockManager := s.store.ensureLockManager(j.StoreName)
+	lock := lockManager.GetLock(j.Id)
+	lock.Lock()
+	defer lock.Unlock()
 
 	// 存在就替换
 	if !j.Replace {
@@ -187,9 +198,16 @@ func (s *Scheduler) AddJob(j Job) (Job, error) {
 	}
 	DefaultLog.Info(ctx, "add job", "job", j)
 
-	if s.isRunning {
+	s.mutexS.RLock()
+	isRunning := s.isRunning
+	s.mutexS.RUnlock()
+	if isRunning {
 		if sj, ok := s.storeJobs.Load(j.StoreName); ok {
-			sj.(*StoreJob).jobChangeChan <- 3
+			select {
+			case sj.(*StoreJob).jobChangeChan <- 3:
+			default:
+				// channel 可能已满或已关闭，忽略
+			}
 		}
 	}
 	return j, nil
@@ -200,8 +218,17 @@ func (s *Scheduler) DeleteJob(storeName string, id string) (err error) {
 	if err != nil {
 		return err
 	}
-	if sj, ok := s.storeJobs.Load(storeName); ok {
-		sj.(*StoreJob).jobChangeChan <- 4
+	s.mutexS.RLock()
+	isRunning := s.isRunning
+	s.mutexS.RUnlock()
+	if isRunning {
+		if sj, ok := s.storeJobs.Load(storeName); ok {
+			select {
+			case sj.(*StoreJob).jobChangeChan <- 4:
+			default:
+				// channel 可能已满或已关闭，忽略
+			}
+		}
 	}
 	return nil
 }
@@ -246,12 +273,11 @@ func (s *Scheduler) GetJobsByStoreName(storeName string, offset, limit int) ([]J
 
 // UpdateJob [job.Id, job.StoreName] 不能修改
 func (s *Scheduler) UpdateJob(j Job) (Job, error) {
-	locks, ok := s.store.locks[j.StoreName]
-	if ok {
-		lock := locks.GetLock(j.Id)
-		lock.Lock()
-		defer lock.Unlock()
-	}
+	// 确保 lockManager 存在并加锁
+	lockManager := s.store.ensureLockManager(j.StoreName)
+	lock := lockManager.GetLock(j.Id)
+	lock.Lock()
+	defer lock.Unlock()
 
 	var err error
 	ctx := NewContext()
@@ -282,21 +308,27 @@ func (s *Scheduler) UpdateJob(j Job) (Job, error) {
 	if err != nil {
 		return Job{}, err
 	}
-	if s.isRunning {
+	s.mutexS.RLock()
+	isRunning := s.isRunning
+	s.mutexS.RUnlock()
+	if isRunning {
 		if sj, ok := s.storeJobs.Load(j.StoreName); ok {
-			sj.(*StoreJob).jobChangeChan <- 5
+			select {
+			case sj.(*StoreJob).jobChangeChan <- 5:
+			default:
+				// channel 可能已满或已关闭，忽略
+			}
 		}
 	}
 	return j, nil
 }
 
 func (s *Scheduler) PauseJob(storeName, id string) (Job, error) {
-	locks, ok := s.store.locks[storeName]
-	if ok {
-		lock := locks.GetLock(id)
-		lock.Lock()
-		defer lock.Unlock()
-	}
+	// 确保 lockManager 存在并加锁
+	lockManager := s.store.ensureLockManager(storeName)
+	lock := lockManager.GetLock(id)
+	lock.Lock()
+	defer lock.Unlock()
 	ctx := NewContext()
 	DefaultLog.Info(ctx, "pause job", "jobId", id)
 	// get old job
@@ -313,21 +345,27 @@ func (s *Scheduler) PauseJob(storeName, id string) (Job, error) {
 	if err != nil {
 		return Job{}, err
 	}
-	if s.isRunning {
+	s.mutexS.RLock()
+	isRunning := s.isRunning
+	s.mutexS.RUnlock()
+	if isRunning {
 		if sj, ok := s.storeJobs.Load(job.StoreName); ok {
-			sj.(*StoreJob).jobChangeChan <- 6
+			select {
+			case sj.(*StoreJob).jobChangeChan <- 6:
+			default:
+				// channel 可能已满或已关闭，忽略
+			}
 		}
 	}
 	return *job, nil
 }
 
 func (s *Scheduler) ResumeJob(storeName, id string) (Job, error) {
-	locks, ok := s.store.locks[storeName]
-	if ok {
-		lock := locks.GetLock(id)
-		lock.Lock()
-		defer lock.Unlock()
-	}
+	// 确保 lockManager 存在并加锁
+	lockManager := s.store.ensureLockManager(storeName)
+	lock := lockManager.GetLock(id)
+	lock.Lock()
+	defer lock.Unlock()
 
 	ctx := NewContext()
 	DefaultLog.Info(ctx, "Scheduler resume job", "jobId", id)
@@ -344,9 +382,16 @@ func (s *Scheduler) ResumeJob(storeName, id string) (Job, error) {
 	if err != nil {
 		return Job{}, err
 	}
-	if s.isRunning {
+	s.mutexS.RLock()
+	isRunning := s.isRunning
+	s.mutexS.RUnlock()
+	if isRunning {
 		if sj, ok := s.storeJobs.Load(job.StoreName); ok {
-			sj.(*StoreJob).jobChangeChan <- 7
+			select {
+			case sj.(*StoreJob).jobChangeChan <- 7:
+			default:
+				// channel 可能已满或已关闭，忽略
+			}
 		}
 	}
 	return *job, nil
@@ -354,8 +399,14 @@ func (s *Scheduler) ResumeJob(storeName, id string) (Job, error) {
 
 // 立即执行任务
 func (s *Scheduler) ImmediatelyRunJob(job Job) error {
-	if sj, ok := s.storeJobs.Load(job.StoreName); ok {
-		sj.(*StoreJob).immediatelyRunJob <- job
+	sj, ok := s.storeJobs.Load(job.StoreName)
+	if !ok {
+		return fmt.Errorf("store not found: %s", job.StoreName)
 	}
-	return nil
+	select {
+	case sj.(*StoreJob).immediatelyRunJob <- job:
+		return nil
+	default:
+		return fmt.Errorf("immediately run job channel is full or closed for store: %s", job.StoreName)
+	}
 }

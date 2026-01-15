@@ -2,6 +2,7 @@ package golangAps
 
 import (
 	"encoding/gob"
+	"fmt"
 	"time"
 )
 
@@ -45,12 +46,17 @@ func (dt *DateTrigger) Init() error {
 		return err
 	}
 
+	if dt.StartTime == "" {
+		return fmt.Errorf("StartTime is required for DateTrigger")
+	}
+
 	rt, err := time.ParseInLocation(time.DateTime, dt.StartTime, dt.timeZone)
 	if err != nil {
 		return err
 	}
 
 	dt.runDate = rt.UTC().Unix()
+	dt.isInit = true
 
 	return nil
 }

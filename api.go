@@ -90,6 +90,15 @@ func (s *Scheduler) EchoAdd(c echo.Context) error {
 	if job.Id == "" || job.StoreName == "" {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "job.Id and job.StoreName are required"})
 	}
+	if job.MaxInstance < 0 {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "job.MaxInstance must be non-negative"})
+	}
+	if job.Timeout < 0 {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "job.Timeout must be non-negative"})
+	}
+	if job.StoreName == "pause" || job.StoreName == "resume" || job.StoreName == "run" {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "storeName cannot be 'pause', 'resume', or 'run'"})
+	}
 
 	saveJob := Job{
 		Id:          job.Id,
@@ -143,6 +152,12 @@ func (s *Scheduler) EchoUpdateJob(c echo.Context) error {
 	}
 	if job.Id == "" || job.StoreName == "" {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "job.Id and job.StoreName are required"})
+	}
+	if job.MaxInstance < 0 {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "job.MaxInstance must be non-negative"})
+	}
+	if job.Timeout < 0 {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "job.Timeout must be non-negative"})
 	}
 
 	saveJob := Job{
@@ -205,7 +220,18 @@ func (s *Scheduler) EchoSearchJobById(c echo.Context) error {
 	prefix := c.QueryParam("prefix")
 	last_id := c.QueryParam("last_id")
 	limitStr := c.QueryParam("limit")
-	limit, _ := strconv.Atoi(limitStr)
+	
+	limit := 50 // 默认值
+	if limitStr != "" {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil || limit <= 0 {
+			return c.JSON(http.StatusBadRequest, echo.Map{"error": "invalid limit parameter, must be a positive integer"})
+		}
+		if limit > 1000 {
+			limit = 1000 // 限制最大值为1000
+		}
+	}
 
 	jobs, nextId, err := s.SearchJobById(store, prefix, last_id, limit)
 	if err != nil {
@@ -249,26 +275,35 @@ func (s *Scheduler) EchoGetJobs(c echo.Context) error {
 	offsetStr := c.QueryParam("offset")
 	limitStr := c.QueryParam("limit")
 
-	offset, _ := strconv.Atoi(offsetStr)
-	limit, _ := strconv.Atoi(limitStr)
-	if limit == 0 {
-		limit = 50
+	offset := 0
+	if offsetStr != "" {
+		var err error
+		offset, err = strconv.Atoi(offsetStr)
+		if err != nil || offset < 0 {
+			return c.JSON(http.StatusBadRequest, echo.Map{"error": "invalid offset parameter, must be a non-negative integer"})
+		}
 	}
 
-	jobs, _ := s.GetJobsByStoreName(store, offset, limit)
-	return c.JSON(http.StatusOK, jobs)
+	limit := 50 // 默认值
+	if limitStr != "" {
+		var err error
+		limit, err = strconv.Atoi(limitStr)
+		if err != nil || limit <= 0 {
+			return c.JSON(http.StatusBadRequest, echo.Map{"error": "invalid limit parameter, must be a positive integer"})
+		}
+		if limit > 1000 {
+			limit = 1000 // 限制最大值为1000
+		}
+	}
+
+	jobs, hasMore := s.GetJobsByStoreName(store, offset, limit)
+	return c.JSON(http.StatusOK, echo.Map{
+		"jobs":    jobs,
+		"has_more": hasMore,
+	})
 }
 
 func (s *Scheduler) EchoGetStoreNames(c echo.Context) error {
-	//offsetStr := c.QueryParam("offset")
-	//limitStr := c.QueryParam("limit")
-	//
-	//offset, _ := strconv.Atoi(offsetStr)
-	//limit, _ := strconv.Atoi(limitStr)
-	//if limit == 0 {
-	//	limit = 50
-	//}
-
 	stores := s.GetAllStoreName()
 	return c.JSON(http.StatusOK, stores)
 }
@@ -304,6 +339,12 @@ func (s *Scheduler) EchoImmediatelyRunJob(c echo.Context) error {
 	}
 	if job.Id == "" || job.StoreName == "" {
 		return c.JSON(http.StatusBadRequest, echo.Map{"error": "job.Id and job.StoreName are required"})
+	}
+	if job.MaxInstance < 0 {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "job.MaxInstance must be non-negative"})
+	}
+	if job.Timeout < 0 {
+		return c.JSON(http.StatusBadRequest, echo.Map{"error": "job.Timeout must be non-negative"})
 	}
 
 	runJob := Job{
