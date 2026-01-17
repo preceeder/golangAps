@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/gob"
 	"fmt"
+	"log/slog"
 	_ "modernc.org/sqlite"
 	"os"
 	"path/filepath"
@@ -64,7 +65,7 @@ func (s *Store) ListPartitions() []string {
 func (s *Store) UpdateJob(storeName string, j *Job) error {
 	jobByte, err := s.StateDump(*j)
 	if err != nil {
-		DefaultLog.Error(context.Background(), "Jobflush fail", "jobId", j.Id, "err", err.Error())
+		slog.ErrorContext(context.Background(), "Jobflush fail", "jobId", j.Id, "err", err.Error())
 		return err
 	}
 	return s.db.SaveJob(storeName, j.Id, jobByte, j.NextRunTime)
@@ -97,7 +98,7 @@ func (s *Store) AtomicListAndLock(storeName string, now int64) ([]string, []*syn
 	// 从数据库查询到期的 jobs
 	jobIDs, err := s.db.ListDueJobs(storeName, now)
 	if err != nil {
-		DefaultLog.Error(context.Background(), "ListDueJobs failed", "storeName", storeName, "err", err)
+		slog.ErrorContext(context.Background(), "ListDueJobs failed", "storeName", storeName, "err", err)
 		return nil, nil
 	}
 
@@ -127,7 +128,7 @@ func (s *Store) SearchJobById(storeName, prefix, lastJobId string, limit int) ([
 		for _, job := range jobs {
 			jb, err := s.StateLoad(job)
 			if err != nil {
-				DefaultLog.Error(context.Background(), "SearchJobById StateLoad failed", "err", err)
+				slog.ErrorContext(context.Background(), "SearchJobById StateLoad failed", "err", err)
 				continue // 跳过无效的 job，继续处理其他的
 			}
 			result = append(result, *jb)
@@ -138,11 +139,11 @@ func (s *Store) SearchJobById(storeName, prefix, lastJobId string, limit int) ([
 
 func (s *Store) GetAllJobs(storeName string, offset, limit int) ([]Job, bool) {
 	defer CatchException(func(err any) {
-		DefaultLog.Error(context.Background(), "error", err)
+		slog.ErrorContext(context.Background(), "error", err)
 	})
 	jobIds, hasMore, err := s.db.ListAllJobsPaged(storeName, offset, limit)
 	if err != nil {
-		DefaultLog.Error(context.Background(), "ListAllJobsPaged failed", "storeName", storeName, "err", err)
+		slog.ErrorContext(context.Background(), "ListAllJobsPaged failed", "storeName", storeName, "err", err)
 		return nil, false
 	}
 	if len(jobIds) == 0 {
@@ -152,7 +153,7 @@ func (s *Store) GetAllJobs(storeName string, offset, limit int) ([]Job, bool) {
 	for _, jobId := range jobIds {
 		job, err := s.LoadJob(storeName, jobId)
 		if err != nil {
-			DefaultLog.Error(context.Background(), "Job LoadJob fail", "jobId", jobId, "err", err.Error())
+			slog.ErrorContext(context.Background(), "Job LoadJob fail", "jobId", jobId, "err", err.Error())
 			continue
 		}
 		jobs = append(jobs, *job)

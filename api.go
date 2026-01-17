@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"github.com/labstack/echo/v4"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -139,7 +140,7 @@ func (s *Scheduler) EchoAdd(c echo.Context) error {
 	var err error
 	result, err = s.AddJob(saveJob)
 	if err != nil {
-		DefaultLog.Error(c.Request().Context(), "[ERROR]", err)
+		slog.ErrorContext(c.Request().Context(), "[ERROR]", err)
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, result)
@@ -199,7 +200,7 @@ func (s *Scheduler) EchoUpdateJob(c echo.Context) error {
 	var err error
 	result, err = s.UpdateJob(saveJob)
 	if err != nil {
-		DefaultLog.Error(c.Request().Context(), "[ERROR]", err)
+		slog.ErrorContext(c.Request().Context(), "[ERROR]", err)
 		return c.JSON(http.StatusInternalServerError, echo.Map{"error": err.Error()})
 	}
 	return c.JSON(http.StatusOK, result)
@@ -220,7 +221,7 @@ func (s *Scheduler) EchoSearchJobById(c echo.Context) error {
 	prefix := c.QueryParam("prefix")
 	last_id := c.QueryParam("last_id")
 	limitStr := c.QueryParam("limit")
-	
+
 	limit := 50 // 默认值
 	if limitStr != "" {
 		var err error
@@ -298,7 +299,7 @@ func (s *Scheduler) EchoGetJobs(c echo.Context) error {
 
 	jobs, hasMore := s.GetJobsByStoreName(store, offset, limit)
 	return c.JSON(http.StatusOK, echo.Map{
-		"jobs":    jobs,
+		"jobs":     jobs,
 		"has_more": hasMore,
 	})
 }
@@ -372,7 +373,7 @@ func BaseErrorCacheEcho() echo.MiddlewareFunc {
 		return func(c echo.Context) error {
 			defer CatchException(func(err any) {
 				trace := PrintStackTrace(err)
-				DefaultLog.Error(context.Background(), "base panic",
+				slog.ErrorContext(context.Background(), "base panic",
 					"err", err,
 					"trace", trace,
 					"method", c.Request().Method,
@@ -397,7 +398,7 @@ func GinLoggerEcho() echo.MiddlewareFunc {
 			ip := c.Request().Header.Get("X-Forwarded-For")
 			params := GetRequestParamsEcho(c)
 
-			DefaultLog.Info(context.Background(), "",
+			slog.InfoContext(context.Background(), "",
 				"method", c.Request().Method,
 				"status", c.Response().Status,
 				"host", c.Request().Host,

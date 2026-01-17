@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"time"
@@ -99,7 +100,7 @@ func (s *Scheduler) Start() {
 	s.mutexS.Lock()
 	defer s.mutexS.Unlock()
 	if s.isRunning {
-		DefaultLog.Info(context.Background(), "Scheduler is running.")
+		slog.InfoContext(context.Background(), "Scheduler is running.")
 		return
 	}
 
@@ -116,14 +117,14 @@ func (s *Scheduler) Start() {
 		}
 		sj := NewStoreJob(s.store, storeName)
 		if err := sj.Start(); err != nil {
-			DefaultLog.Error(context.Background(), "Failed to start StoreJob", "store", storeName, "error", err)
+			slog.ErrorContext(context.Background(), "Failed to start StoreJob", "store", storeName, "error", err)
 			// 继续处理其他 store，不中断整个启动过程
 			continue
 		}
 		s.storeJobs.Store(storeName, sj)
 	}
 
-	DefaultLog.Info(context.Background(), "Scheduler start.")
+	slog.InfoContext(context.Background(), "Scheduler start.")
 }
 
 // Stop 停止scheduler
@@ -131,7 +132,7 @@ func (s *Scheduler) Stop() {
 	s.mutexS.Lock()
 	if !s.isRunning {
 		s.mutexS.Unlock()
-		DefaultLog.Info(context.Background(), "Scheduler has stopped.")
+		slog.InfoContext(context.Background(), "Scheduler has stopped.")
 		return
 	}
 	s.isRunning = false
@@ -143,10 +144,10 @@ func (s *Scheduler) Stop() {
 	})
 	err := s.store.Close()
 	if err != nil {
-		DefaultLog.Error(context.Background(), "Close store failed", "error", err.Error())
+		slog.ErrorContext(context.Background(), "Close store failed", "error", err.Error())
 	}
 	s.cancel()
-	DefaultLog.Info(context.Background(), "Scheduler stop.")
+	slog.InfoContext(context.Background(), "Scheduler stop.")
 }
 
 func (s *Scheduler) AddJob(j Job) (Job, error) {
@@ -169,11 +170,11 @@ func (s *Scheduler) AddJob(j Job) (Job, error) {
 		return Job{}, err
 	}
 
-	DefaultLog.Info(ctx, fmt.Sprintf("Scheduler add job `%s`.", j.Name))
+	slog.InfoContext(ctx, fmt.Sprintf("Scheduler add job `%s`.", j.Name))
 
 	err = s.SetStore(j.StoreName)
 	if err != nil {
-		DefaultLog.Info(ctx, "Scheduler add store err:", err)
+		slog.InfoContext(ctx, "Scheduler add store err:", err)
 		return Job{}, err
 	}
 	// 加锁（确保 lockManager 存在）
@@ -196,7 +197,7 @@ func (s *Scheduler) AddJob(j Job) (Job, error) {
 	if err != nil {
 		return Job{}, err
 	}
-	DefaultLog.Info(ctx, "add job", "job", j)
+	slog.InfoContext(ctx, "add job", "job", j)
 
 	s.mutexS.RLock()
 	isRunning := s.isRunning
@@ -245,7 +246,7 @@ func (s *Scheduler) DeleteAllJobs(storeName string) (err error) {
 		}
 	}()
 
-	DefaultLog.Info(ctx, "delete all jobs.")
+	slog.InfoContext(ctx, "delete all jobs.")
 	err = s.RemoveStore(storeName)
 	if err != nil {
 		return err
@@ -330,7 +331,7 @@ func (s *Scheduler) PauseJob(storeName, id string) (Job, error) {
 	lock.Lock()
 	defer lock.Unlock()
 	ctx := NewContext()
-	DefaultLog.Info(ctx, "pause job", "jobId", id)
+	slog.InfoContext(ctx, "pause job", "jobId", id)
 	// get old job
 	job, err := s.store.LoadJob(storeName, id)
 	if err != nil {
@@ -368,7 +369,7 @@ func (s *Scheduler) ResumeJob(storeName, id string) (Job, error) {
 	defer lock.Unlock()
 
 	ctx := NewContext()
-	DefaultLog.Info(ctx, "Scheduler resume job", "jobId", id)
+	slog.InfoContext(ctx, "Scheduler resume job", "jobId", id)
 	job, err := s.store.LoadJob(storeName, id)
 	if err != nil {
 		return Job{}, err
@@ -405,12 +406,12 @@ func (s *Scheduler) ImmediatelyRunJob(job Job) error {
 		return fmt.Errorf("store not found: %s", job.StoreName)
 	}
 	storeJob := sj.(*StoreJob)
-	
+
 	// 2. 检查 StoreJob 是否正在运行
 	if !storeJob.IsRunning() {
 		return fmt.Errorf("store is not running: %s", job.StoreName)
 	}
-	
+
 	// 3. 尝试发送到 channel（非阻塞）
 	// 注意：如果 channel 已关闭，向已关闭的 channel 发送会 panic
 	// 但使用 select 时，如果 channel 已关闭，case 分支会立即返回 false，不会 panic

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/panjf2000/ants/v2"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -105,7 +106,7 @@ func (b *StoreJob) IsRunning() bool {
 func (b *StoreJob) runJob(ctx Context, j *Job) {
 	defer func() {
 		if err := recover(); err != nil {
-			DefaultLog.Error(ctx, fmt.Sprintf("Job `%s` run error: %s", j.Name, err))
+			slog.ErrorContext(ctx, fmt.Sprintf("Job `%s` run error: %s", j.Name, err))
 		}
 	}()
 
@@ -145,7 +146,7 @@ func (b *StoreJob) runJob(ctx Context, j *Job) {
 					} else {
 						panicErr = fmt.Errorf("%v", err)
 					}
-					DefaultLog.Error(ctx, fmt.Sprintf("Job `%s` run error: %s", j.Name, PrintStackTrace(err)))
+					slog.ErrorContext(ctx, fmt.Sprintf("Job `%s` run error: %s", j.Name, PrintStackTrace(err)))
 					EventChan <- EventInfo{
 						Ctx:       ctx,
 						EventCode: EVENT_JOB_ERROR,
@@ -174,12 +175,12 @@ func (b *StoreJob) runJob(ctx Context, j *Job) {
 		select {
 		case res := <-ch:
 			if res.err != nil {
-				DefaultLog.Error(ctx, fmt.Sprintf("Job `%s` execution error: %v", j.Id, res.err))
+				slog.ErrorContext(ctx, fmt.Sprintf("Job `%s` execution error: %v", j.Id, res.err))
 			}
 			return
 		case <-ctt.Done():
 			err := fmt.Sprintf("Job `%s` run timeout", j.Id)
-			DefaultLog.Warn(ctx, err)
+			slog.WarnContext(ctx, err)
 			EventChan <- EventInfo{
 				Ctx:       ctx,
 				EventCode: EVENT_JOB_ERROR,
@@ -199,7 +200,7 @@ func (b *StoreJob) runJob(ctx Context, j *Job) {
 			Job:       j,
 			Error:     errors.New(msg),
 		}
-		DefaultLog.Warn(ctx, msg)
+		slog.WarnContext(ctx, msg)
 	}
 }
 
@@ -208,13 +209,13 @@ func (b *StoreJob) flushJob(ctx Context, j *Job) {
 	if j.NextRunTime == 0 {
 		err := b.store.RemoveJob(b.storeName, j.Id)
 		if err != nil {
-			DefaultLog.Error(ctx, "Job flush fail", "jobId", j.Id, "err", err.Error())
+			slog.ErrorContext(ctx, "Job flush fail", "jobId", j.Id, "err", err.Error())
 			return
 		}
 	} else {
 		err := b.store.UpdateJob(b.storeName, j)
 		if err != nil {
-			DefaultLog.Error(ctx, "Jobflush fail", "jobId", j.Id, "err", err.Error())
+			slog.ErrorContext(ctx, "Jobflush fail", "jobId", j.Id, "err", err.Error())
 			return
 		}
 	}
@@ -229,7 +230,7 @@ func (b *StoreJob) loopJob(jobIds []string, locks []*sync.Mutex, nowi int64) {
 			// 解除任务锁
 			locks[i].Unlock()
 
-			DefaultLog.Error(taskCtx, "Job loop fail", "jobId", jobID, "err", err.Error())
+			slog.ErrorContext(taskCtx, "Job loop fail", "jobId", jobID, "err", err.Error())
 			continue
 		}
 
@@ -238,7 +239,7 @@ func (b *StoreJob) loopJob(jobIds []string, locks []*sync.Mutex, nowi int64) {
 			b.waitRun.Add(1)
 			nextRunTime, isExpire, err := j.NextRunTimeHandler(taskCtx, nowi)
 			if err != nil {
-				DefaultLog.Error(taskCtx, fmt.Sprintf("store: %s, StoreJob calc next run time error: %s", b.storeName, err))
+				slog.ErrorContext(taskCtx, fmt.Sprintf("store: %s, StoreJob calc next run time error: %s", b.storeName, err))
 				// 解除任务锁
 				locks[i].Unlock()
 
@@ -247,7 +248,7 @@ func (b *StoreJob) loopJob(jobIds []string, locks []*sync.Mutex, nowi int64) {
 			}
 			oldRunTime := j.NextRunTime
 			j.NextRunTime = nextRunTime
-			DefaultLog.Info(taskCtx, "", "store", b.storeName, "jobId", j.Id, "runTime", time.Unix(oldRunTime, 0).Format(time.RFC3339Nano), "next_run_time", time.Unix(j.NextRunTime, 0).Format(time.RFC3339Nano))
+			slog.InfoContext(taskCtx, "", "store", b.storeName, "jobId", j.Id, "runTime", time.Unix(oldRunTime, 0).Format(time.RFC3339Nano), "next_run_time", time.Unix(j.NextRunTime, 0).Format(time.RFC3339Nano))
 
 			// 先一步更新， 对于后续的 在任务重更新就没啥问题了
 			b.flushJob(taskCtx, j)
@@ -260,7 +261,7 @@ func (b *StoreJob) loopJob(jobIds []string, locks []*sync.Mutex, nowi int64) {
 					Job:       j,
 					Error:     errors.New(fmt.Sprintf("过期, Jitter:%d", j.Trigger.GetJitterTime())),
 				}
-				DefaultLog.Info(taskCtx, "job expire jump this exec", "store", b.storeName, "jobId", j.Id)
+				slog.InfoContext(taskCtx, "job expire jump this exec", "store", b.storeName, "jobId", j.Id)
 			} else if currentInstance := b.instances.Get(j.Id); currentInstance >= j.MaxInstance {
 				// job 本次不执行
 				EventChan <- EventInfo{
@@ -269,11 +270,11 @@ func (b *StoreJob) loopJob(jobIds []string, locks []*sync.Mutex, nowi int64) {
 					Job:       j,
 					Error:     errors.New(fmt.Sprintf("执行的任务数量超限, currentInstance: %d, jobMaxInstance: %d", currentInstance, j.MaxInstance)),
 				}
-				DefaultLog.Info(taskCtx, "job max instance jump this exec", "store", b.storeName, "jobId", j.Id)
+				slog.InfoContext(taskCtx, "job max instance jump this exec", "store", b.storeName, "jobId", j.Id)
 			} else {
 				err := b.pool.Submit(func() { b.runJob(taskCtx, j) })
 				if err != nil {
-					DefaultLog.Error(taskCtx, "pool submit _scheduleJob", "store", b.storeName, "error", err.Error(), "job", j)
+					slog.ErrorContext(taskCtx, "pool submit _scheduleJob", "store", b.storeName, "error", err.Error(), "job", j)
 				}
 			}
 			// 解除任务锁
@@ -281,7 +282,7 @@ func (b *StoreJob) loopJob(jobIds []string, locks []*sync.Mutex, nowi int64) {
 
 			b.waitRun.Done()
 		} else {
-			DefaultLog.Warn(taskCtx, "Job nexttime GT Now", "jobId", j.Id, "nexttime", j.NextRunTime, "now", nowi)
+			slog.WarnContext(taskCtx, "Job nexttime GT Now", "jobId", j.Id, "nexttime", j.NextRunTime, "now", nowi)
 			// 解除任务锁
 			locks[i].Unlock()
 
@@ -305,7 +306,7 @@ func (b *StoreJob) run() {
 
 		select {
 		case <-timer.C:
-			DefaultLog.Info(context.Background(), "执行任务了")
+			slog.InfoContext(context.Background(), "执行任务了")
 			now := time.Now().UTC()
 			nowi := now.Unix()
 			jobIds, locks := b.store.AtomicListAndLock(b.storeName, nowi)
@@ -339,13 +340,13 @@ func (b *StoreJob) run() {
 			})
 			if err != nil {
 				jobLock.Unlock()
-				DefaultLog.Error(ctx, "pool submit _scheduleJob", "store", b.storeName, "error", err.Error(), "job", job)
+				slog.ErrorContext(ctx, "pool submit _scheduleJob", "store", b.storeName, "error", err.Error(), "job", job)
 				continue
 			}
 			jobLock.Unlock()
 
 		case <-b.ctx.Done():
-			DefaultLog.Info(context.Background(), "StoreJob run quit.", "store", b.storeName)
+			slog.InfoContext(context.Background(), "StoreJob run quit.", "store", b.storeName)
 			return
 		}
 	}
@@ -370,7 +371,7 @@ func (b *StoreJob) wakeUp() {
 			if nextWakeupInterval <= 0 {
 				nextWakeupInterval = 1
 			}
-			DefaultLog.Info(context.Background(), fmt.Sprintf("StoreJob next wakeup interval %d", nextWakeupInterval), "store", b.storeName)
+			slog.InfoContext(context.Background(), fmt.Sprintf("StoreJob next wakeup interval %d", nextWakeupInterval), "store", b.storeName)
 			b.timerMu.Lock()
 			if b.timer != nil {
 				// Stop 旧的 timer 以避免泄漏
@@ -385,7 +386,7 @@ func (b *StoreJob) wakeUp() {
 			}
 			b.timerMu.Unlock()
 		case <-b.ctx.Done():
-			DefaultLog.Info(context.Background(), "StoreJob wakeUp quit.", "store", b.storeName)
+			slog.InfoContext(context.Background(), "StoreJob wakeUp quit.", "store", b.storeName)
 			return
 		}
 	}

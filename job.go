@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"os"
 	"os/exec"
@@ -118,7 +119,7 @@ func (j *Job) NextRunTimeHandler(ctx Context, nowi int64) (int64, bool, error) {
 	for nextRunTIme != 0 && nextRunTIme <= nowi {
 		nextRunTIme, err = j.Trigger.GetNextRunTime(nextRunTIme, nowi)
 		if err != nil {
-			DefaultLog.Info(ctx, "NextRunTimeHandler", "job", j, "error", err.Error())
+			slog.InfoContext(ctx, "NextRunTimeHandler", "job", j, "error", err.Error())
 			break
 		}
 	}
@@ -237,7 +238,7 @@ func ExecuteScriptJob(job Job) any {
 	marshal, _ := json.Marshal(job.Args)
 	err := json.Unmarshal(marshal, &jobArgs)
 	if err != nil {
-		DefaultLog.Error(context.Background(), "ExecuteScriptJob", "unmarshal job args", err.Error())
+		slog.ErrorContext(context.Background(), "ExecuteScriptJob", "unmarshal job args", err.Error())
 		return err
 	}
 	// 如果 timeout 为 0 或未设置，使用默认超时时间（5分钟）

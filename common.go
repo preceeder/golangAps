@@ -2,6 +2,7 @@ package golangAps
 
 import (
 	"context"
+	"log/slog"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -101,14 +102,14 @@ func SignalListener(cleanup func()) {
 	// 在单独的 goroutine 中等待信号
 	go func() {
 		sig := <-sigChan
-		DefaultLog.Info(context.Background(), "收到系统信号，开始优雅关闭", "signal", sig.String())
+		slog.InfoContext(context.Background(), "收到系统信号，开始优雅关闭", "signal", sig.String())
 
 		// 执行清理函数，设置超时保护
 		if cleanup != nil {
 			done := make(chan struct{})
 			go func() {
 				defer CatchException(func(err any) {
-					DefaultLog.Error(context.Background(), "清理函数执行出错", "error", err)
+					slog.ErrorContext(context.Background(), "清理函数执行出错", "error", err)
 				})
 				cleanup()
 				close(done)
@@ -117,13 +118,13 @@ func SignalListener(cleanup func()) {
 			// 等待清理完成，最多等待 30 秒
 			select {
 			case <-done:
-				DefaultLog.Info(context.Background(), "清理函数执行完成")
+				slog.InfoContext(context.Background(), "清理函数执行完成")
 			case <-time.After(30 * time.Second):
-				DefaultLog.Warn(context.Background(), "清理函数执行超时，强制退出")
+				slog.WarnContext(context.Background(), "清理函数执行超时，强制退出")
 			}
 		}
 
-		DefaultLog.Info(context.Background(), "应用已优雅关闭")
+		slog.InfoContext(context.Background(), "应用已优雅关闭")
 		os.Exit(0)
 	}()
 }

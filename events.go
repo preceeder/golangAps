@@ -2,6 +2,7 @@ package golangAps
 
 import (
 	"context"
+	"log/slog"
 )
 
 type EventInfo struct {
@@ -49,14 +50,14 @@ func StartEventsListen(ctx context.Context) {
 					if (code & ch.EventCode) == ch.EventCode {
 						go func(fn EventFunc, ch EventInfo) {
 							defer CatchException(func(err any) {
-								DefaultLog.Error(context.Background(), "EventsHandler error", "error", err, "eventInfo", ch, "eventFunc", fn)
+								slog.ErrorContext(context.Background(), "EventsHandler error", "error", err, "eventInfo", ch, "eventFunc", fn)
 							})
 							fn(ch)
 						}(fn, ch)
 					}
 				}
 			case <-ctx.Done():
-				DefaultLog.Info(context.Background(), "Events Listen quit.")
+				slog.InfoContext(context.Background(), "Events Listen quit.")
 				return
 			}
 		}
