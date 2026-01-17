@@ -144,6 +144,8 @@ func (ct *CronTrigger) GetNextRunTime(previousFireTime, now int64) (int64, error
 
 	if now > ct.startTime {
 		nextRunTime = expr.Next(time.Unix(now, 0).In(ct.timeZone))
+	} else if ct.startTime > now {
+		nextRunTime = time.Unix(ct.startTime, 0).In(ct.timeZone)
 	} else {
 		nextRunTime = expr.Next(time.Unix(ct.startTime, 0).In(ct.timeZone))
 	}
